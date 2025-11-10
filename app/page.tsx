@@ -3,14 +3,25 @@ import { useEffect, useState } from 'react'
 import { onAuthStateChanged, signOut } from 'firebase/auth'
 import { auth, db } from './lib/firebase'
 import { useRouter } from 'next/navigation'
-import { addDoc, collection, serverTimestamp, query, where, onSnapshot, updateDoc, deleteDoc, doc } from 'firebase/firestore'
+import {
+  addDoc,
+  collection,
+  serverTimestamp,
+  query,
+  where,
+  onSnapshot,
+  updateDoc,
+  deleteDoc,
+  doc,
+  Unsubscribe,
+} from 'firebase/firestore'
 
 interface Task {
   id: string
   title: string
   description: string
   completed: boolean
-  priority: "Low" | "Medium" | "High"
+  priority: 'Low' | 'Medium' | 'High'
   userEmail: string | null
 }
 
@@ -18,30 +29,46 @@ export default function DashboardPage() {
   const [userEmail, setUserEmail] = useState<string | null>(null)
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
-  const [priority, setPriority] = useState<"Low" | "Medium" | "High">("Low")
+  const [priority, setPriority] = useState<'Low' | 'Medium' | 'High'>('Low')
   const [tasks, setTasks] = useState<Task[]>([])
+  const [editingTask, setEditingTask] = useState<Task | null>(null)
   const router = useRouter()
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+    let unsubSnapshot: Unsubscribe | null = null
+
+    const unsubscribeAuth = onAuthStateChanged(auth, (currentUser) => {
       if (currentUser) {
         setUserEmail(currentUser.email)
 
-        // ✅ Fetch tasks in real-time
-        const q = query(collection(db, "tasks"), where("userEmail", "==", currentUser.email))
-        onSnapshot(q, (snapshot) => {
-          const taskList = snapshot.docs.map((doc) => ({
-            id: doc.id,
-            ...doc.data()
-          })) as Task[]
-          setTasks(taskList)
+        // Subscribe to user's tasks (store unsubscribe)
+        const q = query(collection(db, 'tasks'), where('userEmail', '==', currentUser.email))
+        unsubSnapshot = onSnapshot(q, (snapshot) => {
+          const list = snapshot.docs.map((d) => {
+            const data = d.data() as any
+            return {
+              id: d.id,
+              title: data.title ?? '',
+              description: data.description ?? '',
+              completed: !!data.completed,
+              priority: (data.priority as Task['priority']) ?? 'Low',
+              userEmail: data.userEmail ?? null,
+            } as Task
+          })
+          setTasks(list)
         })
-
       } else {
+        setUserEmail(null)
+        setTasks([])
         router.push('/login')
       }
     })
-    return () => unsubscribe()
+
+    return () => {
+      // cleanup both listeners
+      unsubscribeAuth()
+      if (unsubSnapshot) unsubSnapshot()
+    }
   }, [router])
 
   const handleLogout = async () => {
@@ -51,126 +78,218 @@ export default function DashboardPage() {
 
   const handleAddTask = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!title || !description) return alert("Please fill all fields")
-
-    try {
-      await addDoc(collection(db, "tasks"), {
-        title,
-        description,
-        completed: false,
-        priority,
-        userEmail,
-        createdAt: serverTimestamp(),
-      })
-      setTitle('')
-      setDescription('')
-      setPriority("Low")
-    } catch (error: any) {
-      alert(error.message)
+    if (!title.trim() || !description.trim()) {
+      return alert('Please fill all fields')
     }
+
+    await addDoc(collection(db, 'tasks'), {
+      title: title.trim(),
+      description: description.trim(),
+      completed: false,
+      priority,
+      userEmail,
+      createdAt: serverTimestamp(),
+    })
+
+    setTitle('')
+    setDescription('')
+    setPriority('Low')
   }
 
-  const markCompleted = async (id: string) => {
-    await updateDoc(doc(db, "tasks", id), { completed: true })
+  const handleEditSave = async () => {
+    if (!editingTask) return
+    const taskRef = doc(db, 'tasks', editingTask.id)
+    await updateDoc(taskRef, {
+      title: editingTask.title,
+      description: editingTask.description,
+      priority: editingTask.priority,
+    })
+    setEditingTask(null)
+  }
+
+  // Toggle completed (true <-> false)
+  const toggleCompleted = async (id: string, current: boolean) => {
+    await updateDoc(doc(db, 'tasks', id), { completed: !current })
   }
 
   const deleteTask = async (id: string) => {
-    await deleteDoc(doc(db, "tasks", id))
+    if (!confirm('Delete this task?')) return
+    await deleteDoc(doc(db, 'tasks', id))
   }
 
   return (
-    <div className="min-h-screen bg-green-100 flex flex-col items-center p-8 space-y-6">
+    <div className="min-h-screen bg-green-50 p-6 md:p-10">
+      {/* Header */}
+      <div className="flex justify-between items-center max-w-5xl mx-auto mb-8">
+        <div>
+          <h1 className="text-2xl font-bold text-green-900">Hello, {userEmail}</h1>
+          <p className="text-sm text-gray-600">Welcome to your Task Dashboard 👋</p>
+        </div>
 
-      {/* Dashboard Header */}
-      <div className="w-full max-w-2xl bg-white shadow-lg rounded-xl p-8">
-        <h1 className="text-2xl font-bold text-green-800 mb-4">
-          Hello, {userEmail}
-        </h1>
-        <p className="text-gray-700 mb-6">Welcome to your Task Dashboard 👋</p>
-        <button 
-          onClick={handleLogout}
-          className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded transition"
-        >
-          Logout
-        </button>
-      </div>
-
-      {/* Task Form */}
-      <div className="w-full max-w-2xl bg-white shadow-md rounded-xl p-8">
-        <h2 className="text-xl font-semibold text-green-800 mb-4">Add New Task</h2>
-        <form onSubmit={handleAddTask} className="space-y-4">
-
-          <input
-            type="text"
-            placeholder="Task Title"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            className="w-full border px-4 py-2 rounded-lg focus:ring-2 focus:ring-green-700 outline-none"
-          />
-
-          <textarea
-            placeholder="Task Description"
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            className="w-full border px-4 py-2 rounded-lg focus:ring-2 focus:ring-green-700 outline-none"
-          />
-
-          <select
-            value={priority}
-            onChange={(e) => setPriority(e.target.value as "Low" | "Medium" | "High")}
-            className="w-full border px-4 py-2 rounded-lg focus:ring-2 focus:ring-green-700 outline-none"
-          >
-            <option value="Low">Low</option>
-            <option value="Medium">Medium</option>
-            <option value="High">High</option>
-          </select>
-
+        <div className="flex items-center gap-4">
           <button
-            type="submit"
-            className="w-full bg-green-800 hover:bg-green-900 text-white py-2 rounded-lg font-medium transition"
+            onClick={handleLogout}
+            className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded"
           >
-            Add Task
+            Logout
           </button>
-        </form>
+        </div>
       </div>
 
-      {/* ✅ Task Cards */}
-      <div className="w-full max-w-2xl grid gap-4">
-        {tasks.map((task) => (
-          <div key={task.id} className="bg-white p-4 rounded-lg shadow border border-gray-200">
+      {/* Layout: left = form, right = tasks (responsive) */}
+      <div className="max-w-5xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-8">
+        {/* Task Form */}
+        <div className="bg-white p-6 rounded-xl shadow-md">
+          <h2 className="text-xl font-bold text-green-800 mb-4">Add Task</h2>
 
-            <h3 className="text-lg font-semibold">{task.title}</h3>
+          <form onSubmit={handleAddTask} className="space-y-4">
+            <input
+              className="w-full border px-3 py-2 rounded focus:ring-2 focus:ring-green-600"
+              placeholder="Task Title"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+            />
 
-            <span className={`text-xs px-2 py-1 rounded-full inline-block mt-1
-              ${task.priority === "High" ? "bg-red-200 text-red-700" :
-               task.priority === "Medium" ? "bg-yellow-200 text-yellow-700" :
-               "bg-green-200 text-green-700"}`}>
-              {task.priority}
-            </span>
+            <textarea
+              className="w-full border px-3 py-2 rounded focus:ring-2 focus:ring-green-600 h-28"
+              placeholder="Task Description"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+            />
 
-            <p className="mt-2 text-gray-600">{task.description}</p>
+            <select
+              value={priority}
+              onChange={(e) => setPriority(e.target.value as Task['priority'])}
+              className="w-full border px-3 py-2 rounded focus:ring-2 focus:ring-green-600"
+            >
+              <option>Low</option>
+              <option>Medium</option>
+              <option>High</option>
+            </select>
 
-            {task.completed ? (
-              <p className="text-green-700 font-semibold mt-3">✅ Completed</p>
-            ) : (
-              <button 
-                onClick={() => markCompleted(task.id)}
-                className="w-full bg-green-700 text-white py-1 rounded mt-3"
-              >
-                Mark as Completed
-              </button>
+            <button
+              type="submit"
+              className="w-full bg-green-800 hover:bg-green-900 text-white py-2 rounded-lg"
+            >
+              Add Task
+            </button>
+          </form>
+        </div>
+
+        {/* Task List */}
+        <div>
+          <h2 className="text-lg font-semibold text-gray-700 mb-4">Your Tasks</h2>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {tasks.length === 0 && (
+              <div className="col-span-full text-center text-gray-500">No tasks yet — add one!</div>
             )}
 
-            <button 
-              onClick={() => deleteTask(task.id)}
-              className="w-full bg-red-600 text-white py-1 rounded mt-2"
-            >
-              Delete Task
-            </button>
+            {tasks.map((task) => (
+              <div
+                key={task.id}
+                className="bg-white p-4 rounded-xl shadow border flex flex-col justify-between"
+              >
+                <div>
+                  <div className="flex items-start justify-between gap-3">
+                    <h3
+                      className={`text-lg font-semibold ${task.completed ? 'line-through text-gray-400' : ''}`}
+                    >
+                      {task.title}
+                    </h3>
+
+                    <span
+                      className={`px-3 py-1 rounded-full text-xs ${
+                        task.priority === 'High'
+                          ? 'bg-red-100 text-red-800'
+                          : task.priority === 'Medium'
+                          ? 'bg-yellow-100 text-yellow-800'
+                          : 'bg-green-100 text-green-800'
+                      }`}
+                    >
+                      {task.priority}
+                    </span>
+                  </div>
+
+                  <p className={`mt-2 text-sm ${task.completed ? 'text-gray-400' : 'text-gray-600'}`}>
+                    {task.description}
+                  </p>
+                </div>
+
+                <div className="mt-4 flex gap-2">
+                  <button
+                    onClick={() => toggleCompleted(task.id, task.completed)}
+                    className={`flex-1 py-2 rounded text-white ${
+                      task.completed ? 'bg-gray-600 hover:bg-gray-700' : 'bg-green-700 hover:bg-green-800'
+                    }`}
+                  >
+                    {task.completed ? 'Mark Incomplete' : 'Complete'}
+                  </button>
+
+                  <button
+                    onClick={() => setEditingTask(task)}
+                    className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2 rounded"
+                  >
+                    Edit
+                  </button>
+
+                  <button
+                    onClick={() => deleteTask(task.id)}
+                    className="flex-1 bg-red-600 hover:bg-red-700 text-white py-2 rounded"
+                  >
+                    Delete
+                  </button>
+                </div>
+
+                {/* small footer */}
+                <div className="mt-3 text-xs text-gray-400">
+                  {task.completed ? 'Completed' : 'Pending'}
+                </div>
+              </div>
+            ))}
           </div>
-        ))}
+        </div>
       </div>
 
+      {/* Edit Modal */}
+      {editingTask && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+          <div className="bg-white p-5 rounded-xl w-full max-w-md shadow-lg">
+            <h3 className="font-bold text-lg mb-2">Edit Task</h3>
+
+            <input
+              className="border w-full px-3 py-2 rounded mb-2"
+              value={editingTask.title}
+              onChange={(e) => setEditingTask({ ...editingTask, title: e.target.value })}
+            />
+
+            <textarea
+              className="border w-full px-3 py-2 rounded mb-2 h-28"
+              value={editingTask.description}
+              onChange={(e) => setEditingTask({ ...editingTask, description: e.target.value })}
+            />
+
+            <select
+              value={editingTask.priority}
+              onChange={(e) => setEditingTask({ ...editingTask, priority: e.target.value as Task['priority'] })}
+              className="border w-full px-3 py-2 rounded mb-3"
+            >
+              <option>Low</option>
+              <option>Medium</option>
+              <option>High</option>
+            </select>
+
+            <div className="flex gap-2">
+              <button onClick={handleEditSave} className="flex-1 bg-green-700 text-white py-2 rounded">
+                Save
+              </button>
+              <button onClick={() => setEditingTask(null)} className="flex-1 bg-gray-500 text-white py-2 rounded">
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
