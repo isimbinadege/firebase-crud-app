@@ -44,8 +44,8 @@ export default function DashboardPage() {
         const q = query(collection(db, 'tasks'), where('userEmail', '==', currentUser.email))
         unsubSnapshot = onSnapshot(q, (snapshot) => {
           const list = snapshot.docs.map((d) => ({
+            ...(d.data() as Omit<Task, 'id'>),
             id: d.id,
-            ...(d.data() as Task),
           }))
           setTasks(list)
         })
