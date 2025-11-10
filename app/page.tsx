@@ -41,20 +41,12 @@ export default function DashboardPage() {
       if (currentUser) {
         setUserEmail(currentUser.email)
 
-        // Subscribe to user's tasks (store unsubscribe)
         const q = query(collection(db, 'tasks'), where('userEmail', '==', currentUser.email))
         unsubSnapshot = onSnapshot(q, (snapshot) => {
-          const list = snapshot.docs.map((d) => {
-            const data = d.data() as any
-            return {
-              id: d.id,
-              title: data.title ?? '',
-              description: data.description ?? '',
-              completed: !!data.completed,
-              priority: (data.priority as Task['priority']) ?? 'Low',
-              userEmail: data.userEmail ?? null,
-            } as Task
-          })
+          const list = snapshot.docs.map((d) => ({
+            id: d.id,
+            ...(d.data() as Task),
+          }))
           setTasks(list)
         })
       } else {
@@ -65,7 +57,6 @@ export default function DashboardPage() {
     })
 
     return () => {
-      // cleanup both listeners
       unsubscribeAuth()
       if (unsubSnapshot) unsubSnapshot()
     }
@@ -78,13 +69,11 @@ export default function DashboardPage() {
 
   const handleAddTask = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!title.trim() || !description.trim()) {
-      return alert('Please fill all fields')
-    }
+    if (!title.trim() || !description.trim()) return alert('Please fill all fields')
 
     await addDoc(collection(db, 'tasks'), {
-      title: title.trim(),
-      description: description.trim(),
+      title,
+      description,
       completed: false,
       priority,
       userEmail,
@@ -98,8 +87,7 @@ export default function DashboardPage() {
 
   const handleEditSave = async () => {
     if (!editingTask) return
-    const taskRef = doc(db, 'tasks', editingTask.id)
-    await updateDoc(taskRef, {
+    await updateDoc(doc(db, 'tasks', editingTask.id), {
       title: editingTask.title,
       description: editingTask.description,
       priority: editingTask.priority,
@@ -107,7 +95,6 @@ export default function DashboardPage() {
     setEditingTask(null)
   }
 
-  // Toggle completed (true <-> false)
   const toggleCompleted = async (id: string, current: boolean) => {
     await updateDoc(doc(db, 'tasks', id), { completed: !current })
   }
@@ -119,27 +106,26 @@ export default function DashboardPage() {
 
   return (
     <div className="min-h-screen bg-green-50 p-6 md:p-10">
-      {/* Header */}
-      <div className="flex justify-between items-center max-w-5xl mx-auto mb-8">
+      
+      {/* ✅ Responsive Header */}
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 max-w-5xl mx-auto mb-8">
         <div>
           <h1 className="text-2xl font-bold text-green-900">Hello, {userEmail}</h1>
           <p className="text-sm text-gray-600">Welcome to your Task Dashboard 👋</p>
         </div>
 
-        <div className="flex items-center gap-4">
-          <button
-            onClick={handleLogout}
-            className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded"
-          >
-            Logout
-          </button>
-        </div>
+        <button
+          onClick={handleLogout}
+          className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded"
+        >
+          Logout
+        </button>
       </div>
 
-      {/* Layout: left = form, right = tasks (responsive) */}
       <div className="max-w-5xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-8">
-        {/* Task Form */}
-        <div className="bg-white p-6 rounded-xl shadow-md">
+
+        {/* ✅ Add Task Form styled like cards */}
+        <div className="bg-white p-6 rounded-xl shadow border flex flex-col justify-between">
           <h2 className="text-xl font-bold text-green-800 mb-4">Add Task</h2>
 
           <form onSubmit={handleAddTask} className="space-y-4">
@@ -176,7 +162,7 @@ export default function DashboardPage() {
           </form>
         </div>
 
-        {/* Task List */}
+        {/* Tasks List */}
         <div>
           <h2 className="text-lg font-semibold text-gray-700 mb-4">Your Tasks</h2>
 
@@ -186,27 +172,18 @@ export default function DashboardPage() {
             )}
 
             {tasks.map((task) => (
-              <div
-                key={task.id}
-                className="bg-white p-4 rounded-xl shadow border flex flex-col justify-between"
-              >
+              <div key={task.id} className="bg-white p-4 rounded-xl shadow border flex flex-col justify-between">
                 <div>
                   <div className="flex items-start justify-between gap-3">
-                    <h3
-                      className={`text-lg font-semibold ${task.completed ? 'line-through text-gray-400' : ''}`}
-                    >
+                    <h3 className={`text-lg font-semibold ${task.completed ? 'line-through text-gray-400' : ''}`}>
                       {task.title}
                     </h3>
 
-                    <span
-                      className={`px-3 py-1 rounded-full text-xs ${
-                        task.priority === 'High'
-                          ? 'bg-red-100 text-red-800'
-                          : task.priority === 'Medium'
-                          ? 'bg-yellow-100 text-yellow-800'
-                          : 'bg-green-100 text-green-800'
-                      }`}
-                    >
+                    <span className={`px-3 py-1 rounded-full text-xs ${
+                      task.priority === 'High' ? 'bg-red-100 text-red-800' :
+                      task.priority === 'Medium' ? 'bg-yellow-100 text-yellow-800' :
+                      'bg-green-100 text-green-800'
+                    }`}>
                       {task.priority}
                     </span>
                   </div>
@@ -241,7 +218,6 @@ export default function DashboardPage() {
                   </button>
                 </div>
 
-                {/* small footer */}
                 <div className="mt-3 text-xs text-gray-400">
                   {task.completed ? 'Completed' : 'Pending'}
                 </div>
@@ -251,7 +227,6 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* Edit Modal */}
       {editingTask && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
           <div className="bg-white p-5 rounded-xl w-full max-w-md shadow-lg">
@@ -290,6 +265,7 @@ export default function DashboardPage() {
           </div>
         </div>
       )}
+
     </div>
   )
 }
