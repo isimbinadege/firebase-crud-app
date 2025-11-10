@@ -3,10 +3,10 @@ import { useEffect, useState } from 'react'
 import { onAuthStateChanged, signOut } from 'firebase/auth'
 import { auth, db } from './lib/firebase'
 import { useRouter } from 'next/navigation'
-import { addDoc, collection, serverTimestamp } from 'firebase/firestore'
+import { addDoc, collection, serverTimestamp, query, where, onSnapshot, updateDoc, deleteDoc, doc } from 'firebase/firestore'
 
 interface Task {
-  id?: string
+  id: string
   title: string
   description: string
   completed: boolean
@@ -19,12 +19,24 @@ export default function DashboardPage() {
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [priority, setPriority] = useState<"Low" | "Medium" | "High">("Low")
+  const [tasks, setTasks] = useState<Task[]>([])
   const router = useRouter()
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       if (currentUser) {
         setUserEmail(currentUser.email)
+
+        // ✅ Fetch tasks in real-time
+        const q = query(collection(db, "tasks"), where("userEmail", "==", currentUser.email))
+        onSnapshot(q, (snapshot) => {
+          const taskList = snapshot.docs.map((doc) => ({
+            id: doc.id,
+            ...doc.data()
+          })) as Task[]
+          setTasks(taskList)
+        })
+
       } else {
         router.push('/login')
       }
@@ -50,7 +62,6 @@ export default function DashboardPage() {
         userEmail,
         createdAt: serverTimestamp(),
       })
-      alert("Task added successfully!")
       setTitle('')
       setDescription('')
       setPriority("Low")
@@ -59,9 +70,17 @@ export default function DashboardPage() {
     }
   }
 
+  const markCompleted = async (id: string) => {
+    await updateDoc(doc(db, "tasks", id), { completed: true })
+  }
+
+  const deleteTask = async (id: string) => {
+    await deleteDoc(doc(db, "tasks", id))
+  }
+
   return (
     <div className="min-h-screen bg-green-100 flex flex-col items-center p-8 space-y-6">
-      
+
       {/* Dashboard Header */}
       <div className="w-full max-w-2xl bg-white shadow-lg rounded-xl p-8">
         <h1 className="text-2xl font-bold text-green-800 mb-4">
@@ -115,7 +134,42 @@ export default function DashboardPage() {
         </form>
       </div>
 
-      {/* ✅ Task List will come here in the next step */}
+      {/* ✅ Task Cards */}
+      <div className="w-full max-w-2xl grid gap-4">
+        {tasks.map((task) => (
+          <div key={task.id} className="bg-white p-4 rounded-lg shadow border border-gray-200">
+
+            <h3 className="text-lg font-semibold">{task.title}</h3>
+
+            <span className={`text-xs px-2 py-1 rounded-full inline-block mt-1
+              ${task.priority === "High" ? "bg-red-200 text-red-700" :
+               task.priority === "Medium" ? "bg-yellow-200 text-yellow-700" :
+               "bg-green-200 text-green-700"}`}>
+              {task.priority}
+            </span>
+
+            <p className="mt-2 text-gray-600">{task.description}</p>
+
+            {task.completed ? (
+              <p className="text-green-700 font-semibold mt-3">✅ Completed</p>
+            ) : (
+              <button 
+                onClick={() => markCompleted(task.id)}
+                className="w-full bg-green-700 text-white py-1 rounded mt-3"
+              >
+                Mark as Completed
+              </button>
+            )}
+
+            <button 
+              onClick={() => deleteTask(task.id)}
+              className="w-full bg-red-600 text-white py-1 rounded mt-2"
+            >
+              Delete Task
+            </button>
+          </div>
+        ))}
+      </div>
 
     </div>
   )
