@@ -107,7 +107,7 @@ export default function DashboardPage() {
   return (
     <div className="min-h-screen bg-green-50 p-6 md:p-10">
       
-      {/* ✅ Responsive Header */}
+      
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 max-w-5xl mx-auto mb-8">
         <div>
           <h1 className="text-2xl font-bold text-green-900">Hello, {userEmail}</h1>
